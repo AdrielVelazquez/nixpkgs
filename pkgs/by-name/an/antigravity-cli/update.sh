@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i bash -p bash common-updater-scripts coreutils curl gnutar nix
+#!nix-shell -i bash -p bash common-updater-scripts coreutils curl gnutar jq nix
 # shellcheck shell=bash
 set -euo pipefail
 
@@ -11,15 +11,97 @@ trap 'rm -rf "$tmpdir"' EXIT
 
 cd -- "$nixpkgs_root"
 
-if (( $# < 3 || ($# - 1) % 2 != 0 )); then
-  echo "Usage: $0 <version> [<system> <url>]..." >&2
+if (( $# != 0 )); then
+  echo "Usage: $0" >&2
   exit 1
 fi
 
-version="$1"
-shift
-
 export NIXPKGS_ALLOW_UNFREE=1
+
+attr_path="${UPDATE_NIX_ATTR_PATH:-antigravity-cli}"
+manifest_base_url="https://antigravity-cli-auto-updater-974169037036.us-central1.run.app"
+
+declare -A manifest_platforms=(
+  ["x86_64-linux"]="linux_amd64"
+  ["aarch64-linux"]="linux_arm64"
+  ["aarch64-darwin"]="darwin_arm64"
+  ["x86_64-darwin"]="darwin_amd64"
+)
+declare -A urls=()
+declare -A changed=()
+
+package_systems() {
+  nix-instantiate --eval --raw \
+    --argstr attrPath "$attr_path" \
+    -E '{ attrPath }: let pkgs = import ./. { }; lib = pkgs.lib; pkg = lib.attrByPath (lib.splitString "." attrPath) (throw "Missing package ${attrPath}") pkgs; in builtins.concatStringsSep "\n" (builtins.attrNames pkg.sources)'
+}
+
+current_package_version() {
+  nix-instantiate --eval --strict --raw \
+    --argstr attrPath "$attr_path" \
+    -E '{ attrPath }: let pkgs = import ./. { }; lib = pkgs.lib; pkg = lib.attrByPath (lib.splitString "." attrPath) (throw "Missing package ${attrPath}") pkgs; in pkg.version'
+}
+
+current_url_for_system() {
+  local system="$1"
+
+  nix-instantiate --eval --strict --raw \
+    --argstr attrPath "$attr_path" \
+    --argstr system "$system" \
+    -E '{ attrPath, system }: let pkgs = import ./. { }; lib = pkgs.lib; pkg = lib.attrByPath (lib.splitString "." attrPath) (throw "Missing package ${attrPath}") pkgs; source = builtins.getAttr system pkg.sources; in builtins.elemAt (source.drvAttrs.urls or [ source.url ]) 0'
+}
+
+readarray -t systems < <(package_systems)
+
+latest_version=""
+for system in "${systems[@]}"; do
+  if [[ -z "${manifest_platforms[$system]:-}" ]]; then
+    echo "No Antigravity CLI manifest platform mapping for $system" >&2
+    exit 1
+  fi
+
+  manifest_platform="${manifest_platforms[$system]}"
+  manifest="$tmpdir/$manifest_platform.json"
+  curl -fsSL "$manifest_base_url/manifests/$manifest_platform.json" -o "$manifest"
+
+  version="$(jq -r '.version // empty' "$manifest")"
+  url="$(jq -r '.url // empty' "$manifest")"
+
+  if [[ -z "$version" || -z "$url" ]]; then
+    echo "Manifest for $system is missing version or URL" >&2
+    exit 1
+  fi
+
+  if [[ "$url" != *"/antigravity-cli/$version-"* ]]; then
+    echo "URL for $system does not match manifest version $version: $url" >&2
+    exit 1
+  fi
+
+  if [[ -n "$latest_version" && "$latest_version" != "$version" ]]; then
+    echo "Version mismatch: $latest_version != $version for $system" >&2
+    exit 1
+  fi
+
+  latest_version="$version"
+  urls[$system]="$url"
+done
+
+current_version="${UPDATE_NIX_OLD_VERSION:-$(current_package_version)}"
+has_changes=0
+for system in "${systems[@]}"; do
+  current_url="$(current_url_for_system "$system")"
+  if [[ "$current_version" != "$latest_version" || "$current_url" != "${urls[$system]}" ]]; then
+    changed[$system]=1
+    has_changes=1
+  else
+    changed[$system]=0
+  fi
+done
+
+if (( has_changes == 0 )); then
+  echo "antigravity-cli is already at version $current_version with current manifest URLs"
+  exit 0
+fi
 
 hash_url() {
   local system="$1"
@@ -39,19 +121,15 @@ hash_url() {
   nix hash path --type sha256 "$unpack_dir"
 }
 
-while (( $# > 0 )); do
-  system="$1"
-  url="$2"
-  shift 2
-
-  if [[ "$url" != *"/antigravity-cli/$version-"* ]]; then
-    echo "URL for $system does not match package version $version: $url" >&2
-    exit 1
+for system in "${systems[@]}"; do
+  if (( changed[$system] == 0 )); then
+    continue
   fi
 
+  url="${urls[$system]}"
   echo "Hashing $system from $url"
   hash="$(hash_url "$system" "$url")"
-  update-source-version antigravity-cli "$version" "$hash" \
+  update-source-version "$attr_path" "$latest_version" "$hash" "$url" \
     --file="$package_file" \
     --ignore-same-hash \
     --ignore-same-version \

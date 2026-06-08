@@ -12,20 +12,20 @@ let
 
   sourceData = {
     "x86_64-linux" = {
-      url = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.0.6-5359777384103936/linux-x64/cli_linux_x64.tar.gz";
-      hash = "sha256-rxDLuuium+yQl3SiRcFhLzC5+ZCZU/tG2LQfFZMOYx4=";
+      url = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.0.6-6458082025406464/linux-x64/cli_linux_x64.tar.gz";
+      hash = "sha256-TpwTZuGoZSCw7SNIE7M/WPczPcmR/XdDw/I5n88ouWQ=";
     };
     "aarch64-linux" = {
-      url = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.0.6-5359777384103936/linux-arm/cli_linux_arm64.tar.gz";
-      hash = "sha256-Mol5V3Lt2A89yrGdwWiOdv4y5dCZkMaT8onXG6IsQtc=";
+      url = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.0.6-6458082025406464/linux-arm/cli_linux_arm64.tar.gz";
+      hash = "sha256-UuLN1xygJSMvIjw+nYW0+NrCdXkh1xCkAT6BjdB9hEA=";
     };
     "aarch64-darwin" = {
-      url = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.0.6-5359777384103936/darwin-arm/cli_mac_arm64.tar.gz";
-      hash = "sha256-GmAxVP6KW0Zii2kSDvwwzsa88r/4ko2BVVpS8BeING4=";
+      url = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.0.6-6458082025406464/darwin-arm/cli_mac_arm64.tar.gz";
+      hash = "sha256-fbP4FF1n3gNhbem45p8O/8GYdl85NcGvOJ2WF1UUoDo=";
     };
     "x86_64-darwin" = {
-      url = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.0.6-5359777384103936/darwin-x64/cli_mac_x64.tar.gz";
-      hash = "sha256-RqjKhRqiW6Fg61eYzem+uXb5LXBYi5Cyv0hwtCaqomo=";
+      url = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.0.6-6458082025406464/darwin-x64/cli_mac_x64.tar.gz";
+      hash = "sha256-3daHp4baEA+PU4bqeLlse8I/CoqRVJ2hYbETevPGnBw=";
     };
   };
 
@@ -36,15 +36,14 @@ let
     }
   ) sourceData;
 
-  source =
-    sources.${stdenv.hostPlatform.system}
-      or (throw "Unsupported system: ${stdenv.hostPlatform.system}");
 in
 stdenv.mkDerivation (finalAttrs: {
   pname = "antigravity-cli";
   inherit version;
 
-  src = source;
+  src =
+    sources.${stdenv.hostPlatform.system}
+      or (throw "Unsupported system: ${stdenv.hostPlatform.system}");
 
   strictDeps = true;
   __structuredAttrs = true;
@@ -67,14 +66,7 @@ stdenv.mkDerivation (finalAttrs: {
 
   passthru = {
     inherit sources;
-    updateScript = [
-      ./update.sh
-      version
-    ]
-    ++ lib.concatMap (system: [
-      system
-      sourceData.${system}.url
-    ]) (lib.attrNames sourceData);
+    updateScript = ./update.sh;
   };
 
   meta = {
