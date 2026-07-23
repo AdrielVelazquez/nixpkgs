@@ -104,6 +104,15 @@
   "module-services-onedrive": [
     "index.html#module-services-onedrive"
   ],
+  "module-services-orbit": [
+    "index.html#module-services-orbit"
+  ],
+  "module-services-orbit-enrollment-secret": [
+    "index.html#module-services-orbit-enrollment-secret"
+  ],
+  "module-services-orbit-tls-setup": [
+    "index.html#module-services-orbit-tls-setup"
+  ],
   "module-services-tandoor-recipes-migrating-media-option-move": [
     "index.html#module-services-tandoor-recipes-migrating-media-option-move",
     "index.html#module-services-tandoor-recipes-migrating-media-option-1"

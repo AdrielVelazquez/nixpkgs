@@ -132,6 +132,7 @@ in
   };
 
   meta.maintainers = with lib.maintainers; [ adrielvelazquez ];
+  meta.doc = ./orbit.md;
 
   config = lib.mkIf cfg.enable {
     systemd.services.orbit = {
