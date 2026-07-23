@@ -11,10 +11,8 @@
 
 buildGoModule {
   pname = "fleet-desktop";
-  inherit (fleet-orbit) version src;
+  inherit (fleet-orbit) version src vendorHash;
   __structuredAttrs = true;
-
-  vendorHash = "sha256-fhACxmzJY0PEQmMbjQxlfQh5ZJ+7a4um0s8xFQq+57w=";
 
   env.CGO_ENABLED = "1";
 

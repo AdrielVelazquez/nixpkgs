@@ -2,23 +2,24 @@
   lib,
   buildGoModule,
   fetchFromGitHub,
+  nix-update-script,
   nixosTests,
   versionCheckHook,
 }:
 
 buildGoModule (finalAttrs: {
   pname = "fleet-orbit";
-  version = "1.55.0";
+  version = "1.58.0";
   __structuredAttrs = true;
 
   src = fetchFromGitHub {
     owner = "fleetdm";
     repo = "fleet";
     tag = "orbit-v${finalAttrs.version}";
-    hash = "sha256-gaS6A9Zfpb/VMQMAO5qI0lIaohD8jj4KWFRTU0OeqMo=";
+    hash = "sha256-3rZpL22fLQUT6lihauaxExtIkBCOwyp2/fWLslTfafY=";
   };
 
-  vendorHash = "sha256-fhACxmzJY0PEQmMbjQxlfQh5ZJ+7a4um0s8xFQq+57w=";
+  vendorHash = "sha256-+cVeqdFEXQxjFUj9GpzK8IENzvvgat0P+PfP77mUq2I=";
 
   env.CGO_ENABLED = "1";
 
@@ -45,8 +46,13 @@ buildGoModule (finalAttrs: {
   versionCheckProgramArg = "version";
   nativeInstallCheckInputs = [ versionCheckHook ];
 
-  passthru.tests = {
-    inherit (nixosTests) orbit;
+  passthru = {
+    tests = {
+      inherit (nixosTests) orbit;
+    };
+    updateScript = nix-update-script {
+      extraArgs = [ "--version-regex=^orbit-v(\\d+\\.\\d+\\.\\d+)$" ];
+    };
   };
 
   meta = {
