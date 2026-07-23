@@ -1,0 +1,130 @@
+Subject: [PATCH] orbit: make script interpreter paths configurable at build time
+Upstream-Status: Pending
+
+diff --git a/orbit/pkg/scripts/exec_nonwindows.go b/orbit/pkg/scripts/exec_nonwindows.go
+index cedbd73..306c10a 100644
+--- a/orbit/pkg/scripts/exec_nonwindows.go
++++ b/orbit/pkg/scripts/exec_nonwindows.go
+@@ -3,16 +3,68 @@
+ package scripts
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"os"
+ 	"os/exec"
+ 	"path/filepath"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/fleetdm/fleet/v4/server/contexts/ctxerr"
+ 	"github.com/fleetdm/fleet/v4/server/fleet"
+ )
+ 
++var (
++	scriptShPath      string
++	scriptBashPath    string
++	scriptZshPath     string
++	scriptPythonPath  string
++	scriptPython3Path string
++)
++
++func configuredInterpreterPaths() map[string]string {
++	return map[string]string{
++		"sh":      scriptShPath,
++		"bash":    scriptBashPath,
++		"zsh":     scriptZshPath,
++		"python":  scriptPythonPath,
++		"python3": scriptPython3Path,
++	}
++}
++
++func rewriteShebang(contents []byte, interpreterPaths map[string]string) []byte {
++	if !bytes.HasPrefix(contents, []byte("#!")) {
++		return contents
++	}
++
++	lineEnd := bytes.IndexByte(contents, '\n')
++	if lineEnd == -1 {
++		lineEnd = len(contents)
++	}
++	firstLine := string(contents[:lineEnd])
++	fields := strings.Fields(strings.TrimPrefix(strings.TrimSuffix(firstLine, "\r"), "#!"))
++	if len(fields) == 0 {
++		return contents
++	}
++
++	interpreter := fields[0]
++	if interpreter == "/bin/sh" || filepath.Base(interpreter) == "env" {
++		return contents
++	}
++	replacement := interpreterPaths[filepath.Base(interpreter)]
++	if replacement == "" {
++		return contents
++	}
++
++	start := strings.Index(firstLine, interpreter)
++	rewritten := make([]byte, 0, len(contents)-len(interpreter)+len(replacement))
++	rewritten = append(rewritten, contents[:start]...)
++	rewritten = append(rewritten, replacement...)
++	rewritten = append(rewritten, contents[start+len(interpreter):]...)
++	return rewritten
++}
++
+ func ExecCmd(ctx context.Context, scriptPath string, env []string) (output []byte, exitCode int, err error) {
+ 	// initialize to -1 in case the process never starts
+ 	exitCode = -1
+@@ -26,6 +78,13 @@ func ExecCmd(ctx context.Context, scriptPath string, env []string) (output []byt
+ 		return nil, -1, ctxerr.Wrapf(ctx, err, "validating script %s", scriptPath)
+ 	}
+ 
++	rewrittenContents := rewriteShebang(contents, configuredInterpreterPaths())
++	if !bytes.Equal(rewrittenContents, contents) {
++		if err := os.WriteFile(scriptPath, rewrittenContents, 0o600); err != nil {
++			return nil, -1, ctxerr.Wrapf(ctx, err, "rewriting script interpreter %s", scriptPath)
++		}
++	}
++
+ 	cmd := exec.CommandContext(ctx, "/bin/sh", scriptPath)
+ 
+ 	if directExecute {
+diff --git a/orbit/pkg/scripts/exec_nonwindows_test.go b/orbit/pkg/scripts/exec_nonwindows_test.go
+index e4d279e..f3e6fd1 100644
+--- a/orbit/pkg/scripts/exec_nonwindows_test.go
++++ b/orbit/pkg/scripts/exec_nonwindows_test.go
+@@ -160,3 +160,35 @@ func TestExecCmdSuccess(t *testing.T) {
+ 		t.Fatalf("Expected output %q, got: %q", expectedOutput, output)
+ 	}
+ }
++
++func TestRewriteShebang(t *testing.T) {
++	interpreterPaths := map[string]string{
++		"sh":      "/nix/store/bash/bin/sh",
++		"bash":    "/nix/store/bash/bin/bash",
++		"zsh":     "/nix/store/zsh/bin/zsh",
++		"python":  "/nix/store/python/bin/python3",
++		"python3": "/nix/store/python/bin/python3",
++	}
++
++	tests := []struct {
++		name     string
++		contents string
++		want     string
++	}{
++		{name: "bin sh remains standard", contents: "#!/bin/sh\necho sh", want: "#!/bin/sh\necho sh"},
++		{name: "usr bin sh", contents: "#!/usr/bin/sh -e\necho sh", want: "#!/nix/store/bash/bin/sh -e\necho sh"},
++		{name: "bash arguments and CRLF", contents: "#!/bin/bash -e\r\necho bash\r\n", want: "#!/nix/store/bash/bin/bash -e\r\necho bash\r\n"},
++		{name: "zsh without final newline", contents: "#!/usr/bin/zsh -f", want: "#!/nix/store/zsh/bin/zsh -f"},
++		{name: "python", contents: "#!/usr/bin/python -u\nprint('python')", want: "#!/nix/store/python/bin/python3 -u\nprint('python')"},
++		{name: "python3 external absolute path", contents: "#!/opt/python3 -I\nprint('python3')", want: "#!/nix/store/python/bin/python3 -I\nprint('python3')"},
++		{name: "env remains unchanged", contents: "#!/usr/bin/env bash -e\necho env", want: "#!/usr/bin/env bash -e\necho env"},
++		{name: "no shebang remains unchanged", contents: "echo fallback", want: "echo fallback"},
++		{name: "unsupported remains unchanged", contents: "#!/bin/ksh\necho unsupported", want: "#!/bin/ksh\necho unsupported"},
++	}
++
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			require.Equal(t, tt.want, string(rewriteShebang([]byte(tt.contents), interpreterPaths)))
++		})
++	}
++}
