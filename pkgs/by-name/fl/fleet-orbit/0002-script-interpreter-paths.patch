@@ -2,10 +2,10 @@ Subject: [PATCH] orbit: make script interpreter paths configurable at build time
 Upstream-Status: Pending
 
 diff --git a/orbit/pkg/scripts/exec_nonwindows.go b/orbit/pkg/scripts/exec_nonwindows.go
-index cedbd73..306c10a 100644
+index cedbd73..0b84c38 100644
 --- a/orbit/pkg/scripts/exec_nonwindows.go
 +++ b/orbit/pkg/scripts/exec_nonwindows.go
-@@ -3,16 +3,68 @@
+@@ -3,16 +3,74 @@
  package scripts
  
  import (
@@ -22,6 +22,7 @@ index cedbd73..306c10a 100644
  )
  
 +var (
++	scriptEnvPath     string
 +	scriptShPath      string
 +	scriptBashPath    string
 +	scriptZshPath     string
@@ -31,6 +32,7 @@ index cedbd73..306c10a 100644
 +
 +func configuredInterpreterPaths() map[string]string {
 +	return map[string]string{
++		"env":     scriptEnvPath,
 +		"sh":      scriptShPath,
 +		"bash":    scriptBashPath,
 +		"zsh":     scriptZshPath,
@@ -55,10 +57,14 @@ index cedbd73..306c10a 100644
 +	}
 +
 +	interpreter := fields[0]
-+	if interpreter == "/bin/sh" || filepath.Base(interpreter) == "env" {
++	interpreterName := filepath.Base(interpreter)
++	if interpreter == "/bin/sh" || interpreter == "/usr/bin/env" {
 +		return contents
 +	}
-+	replacement := interpreterPaths[filepath.Base(interpreter)]
++	if strings.HasPrefix(interpreterName, "python3.") {
++		interpreterName = "python3"
++	}
++	replacement := interpreterPaths[interpreterName]
 +	if replacement == "" {
 +		return contents
 +	}
@@ -74,7 +80,7 @@ index cedbd73..306c10a 100644
  func ExecCmd(ctx context.Context, scriptPath string, env []string) (output []byte, exitCode int, err error) {
  	// initialize to -1 in case the process never starts
  	exitCode = -1
-@@ -26,6 +78,13 @@ func ExecCmd(ctx context.Context, scriptPath string, env []string) (output []byt
+@@ -26,6 +84,13 @@ func ExecCmd(ctx context.Context, scriptPath string, env []string) (output []byt
  		return nil, -1, ctxerr.Wrapf(ctx, err, "validating script %s", scriptPath)
  	}
  
@@ -89,16 +95,56 @@ index cedbd73..306c10a 100644
  
  	if directExecute {
 diff --git a/orbit/pkg/scripts/exec_nonwindows_test.go b/orbit/pkg/scripts/exec_nonwindows_test.go
-index e4d279e..f3e6fd1 100644
+index e4d279e..7173d5c 100644
 --- a/orbit/pkg/scripts/exec_nonwindows_test.go
 +++ b/orbit/pkg/scripts/exec_nonwindows_test.go
-@@ -160,3 +160,35 @@ func TestExecCmdSuccess(t *testing.T) {
+@@ -160,3 +160,77 @@ func TestExecCmdSuccess(t *testing.T) {
  		t.Fatalf("Expected output %q, got: %q", expectedOutput, output)
  	}
  }
 +
++func TestExecCmdValidatesBeforeRewrite(t *testing.T) {
++	oldScriptBashPath := scriptBashPath
++	scriptBashPath = "/nix/store/bash/bin/bash"
++	t.Cleanup(func() { scriptBashPath = oldScriptBashPath })
++
++	scriptContent := "#!/opt/bash\necho unsupported"
++	scriptPath, err := writeTestScript(scriptContent)
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, os.Remove(scriptPath)) })
++
++	output, exitCode, err := ExecCmd(context.Background(), scriptPath, nil)
++	require.Empty(t, output)
++	require.Equal(t, -1, exitCode)
++	require.ErrorIs(t, err, fleet.ErrUnsupportedInterpreter)
++
++	contents, err := os.ReadFile(scriptPath)
++	require.NoError(t, err)
++	require.Equal(t, scriptContent, string(contents))
++}
++
++func TestExecCmdRewritesSupportedShebang(t *testing.T) {
++	oldScriptPython3Path := scriptPython3Path
++	scriptPython3Path = "/bin/sh"
++	t.Cleanup(func() { scriptPython3Path = oldScriptPython3Path })
++
++	scriptPath, err := writeTestScript("#!/usr/bin/python3\nprintf rewritten")
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, os.Remove(scriptPath)) })
++
++	output, exitCode, err := ExecCmd(context.Background(), scriptPath, nil)
++	require.NoError(t, err)
++	require.Equal(t, 0, exitCode)
++	require.Equal(t, "rewritten", string(output))
++
++	contents, err := os.ReadFile(scriptPath)
++	require.NoError(t, err)
++	require.Equal(t, "#!/bin/sh\nprintf rewritten", string(contents))
++}
++
 +func TestRewriteShebang(t *testing.T) {
 +	interpreterPaths := map[string]string{
++		"env":     "/nix/store/coreutils/bin/env",
 +		"sh":      "/nix/store/bash/bin/sh",
 +		"bash":    "/nix/store/bash/bin/bash",
 +		"zsh":     "/nix/store/zsh/bin/zsh",
@@ -117,6 +163,8 @@ index e4d279e..f3e6fd1 100644
 +		{name: "zsh without final newline", contents: "#!/usr/bin/zsh -f", want: "#!/nix/store/zsh/bin/zsh -f"},
 +		{name: "python", contents: "#!/usr/bin/python -u\nprint('python')", want: "#!/nix/store/python/bin/python3 -u\nprint('python')"},
 +		{name: "python3 external absolute path", contents: "#!/opt/python3 -I\nprint('python3')", want: "#!/nix/store/python/bin/python3 -I\nprint('python3')"},
++		{name: "versioned python3", contents: "#!/usr/bin/python3.11 -I\nprint('python3')", want: "#!/nix/store/python/bin/python3 -I\nprint('python3')"},
++		{name: "bin env", contents: "#!/bin/env python3 -I\nprint('python3')", want: "#!/nix/store/coreutils/bin/env python3 -I\nprint('python3')"},
 +		{name: "env remains unchanged", contents: "#!/usr/bin/env bash -e\necho env", want: "#!/usr/bin/env bash -e\necho env"},
 +		{name: "no shebang remains unchanged", contents: "echo fallback", want: "echo fallback"},
 +		{name: "unsupported remains unchanged", contents: "#!/bin/ksh\necho unsupported", want: "#!/bin/ksh\necho unsupported"},

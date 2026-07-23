@@ -135,6 +135,13 @@ in
   meta.doc = ./orbit.md;
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = !lib.hasPrefix "${builtins.storeDir}/" (toString cfg.enrollSecretPath);
+        message = "services.orbit.enrollSecretPath must reference a runtime file outside the Nix store.";
+      }
+    ];
+
     systemd.services.orbit = {
       description = "Fleet Orbit agent";
       wantedBy = [ "multi-user.target" ];

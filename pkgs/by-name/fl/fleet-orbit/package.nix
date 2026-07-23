@@ -1,8 +1,9 @@
 {
   bash,
-  lib,
   buildGoModule,
+  coreutils,
   fetchFromGitHub,
+  lib,
   nix-update-script,
   nixosTests,
   python3,
@@ -36,6 +37,7 @@ buildGoModule (finalAttrs: {
     "-X=github.com/fleetdm/fleet/v4/orbit/pkg/build.Version=${finalAttrs.version}"
     "-X=github.com/fleetdm/fleet/v4/orbit/pkg/build.Commit=0000000000000000000000000000000000000000"
     "-X=github.com/fleetdm/fleet/v4/orbit/pkg/build.Date=1970-01-01T00:00:00Z"
+    "-X=github.com/fleetdm/fleet/v4/orbit/pkg/scripts.scriptEnvPath=${lib.getExe' coreutils "env"}"
     "-X=github.com/fleetdm/fleet/v4/orbit/pkg/scripts.scriptShPath=${lib.getExe' bash "sh"}"
     "-X=github.com/fleetdm/fleet/v4/orbit/pkg/scripts.scriptBashPath=${lib.getExe bash}"
     "-X=github.com/fleetdm/fleet/v4/orbit/pkg/scripts.scriptZshPath=${lib.getExe zsh}"
@@ -50,8 +52,10 @@ buildGoModule (finalAttrs: {
 
   preCheck = ''
     go test ./orbit/cmd/orbit \
-      -run '^(TestExternalComponentPaths|TestConfiguredPath|TestLinuxBrowserPath)$'
-    go test ./orbit/pkg/scripts -run '^TestRewriteShebang$'
+      -run '^(TestExternalComponentPaths|TestConfiguredPath|TestLinuxBrowserPath|TestUpdateRunnerTargets)$'
+    go test ./orbit/pkg/update -run '^TestNewRunnerAllowsEmptyTargets$'
+    go test ./orbit/pkg/scripts \
+      -run '^(TestExecCmdRewritesSupportedShebang|TestExecCmdValidatesBeforeRewrite|TestRewriteShebang)$'
   '';
 
   doInstallCheck = true;

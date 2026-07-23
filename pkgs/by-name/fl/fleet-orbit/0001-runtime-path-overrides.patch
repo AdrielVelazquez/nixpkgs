@@ -2,7 +2,7 @@ Subject: [PATCH] orbit: allow external runtime paths
 Upstream-Status: Pending
 
 diff --git a/orbit/cmd/orbit/orbit.go b/orbit/cmd/orbit/orbit.go
-index 3975b54..53228b3 100644
+index 3975b54..8e2ef67 100644
 --- a/orbit/cmd/orbit/orbit.go
 +++ b/orbit/cmd/orbit/orbit.go
 @@ -111,6 +111,26 @@ func main() {
@@ -32,7 +32,7 @@ index 3975b54..53228b3 100644
  		&cli.StringFlag{
  			Name:    "fleet-desktop-alternative-browser-host",
  			Usage:   "Alternative host:port to use for Fleet Desktop in the browser (this may be required when using TLS client authentication in the Fleet server)",
-@@ -393,6 +413,28 @@ func tryReadEnrollSecretFromKeystore(currentSecret string, ks enrollSecretKeysto
+@@ -393,6 +413,42 @@ func tryReadEnrollSecretFromKeystore(currentSecret string, ks enrollSecretKeysto
  	return nil
  }
  
@@ -58,10 +58,24 @@ index 3975b54..53228b3 100644
 +	return "/usr/bin/xdg-open"
 +}
 +
++func updateRunnerTargets(externalComponentsComplete, desktopEnabled, devMode bool) ([]string, bool) {
++	targets := []string{constant.OrbitTUFTargetName}
++	if !externalComponentsComplete {
++		targets = append(targets, constant.OsqueryTUFTargetName)
++		if desktopEnabled {
++			targets = append(targets, constant.DesktopTUFTargetName)
++		}
++	}
++	if devMode {
++		targets = targets[1:]
++	}
++	return targets, len(targets) == 0
++}
++
  // orbitAction is a named function so that NilAway can analyze it for nil-safety.
  func orbitAction(c *cli.Context) error {
  	if c.Bool("version") {
-@@ -633,11 +675,14 @@ func orbitAction(c *cli.Context) error {
+@@ -633,11 +689,14 @@ func orbitAction(c *cli.Context) error {
  	opt.InsecureTransport = c.Bool("insecure")
  	opt.ServerCertificatePath = c.String("update-tls-certificate")
  
@@ -80,7 +94,7 @@ index 3975b54..53228b3 100644
  	)
  
  	// Setting up the system service management early on the process lifetime
-@@ -685,10 +730,12 @@ func orbitAction(c *cli.Context) error {
+@@ -685,35 +744,42 @@ func orbitAction(c *cli.Context) error {
  			log.Info().Err(err).Msg("detected signatures expired at startup")
  		}
  
@@ -88,16 +102,22 @@ index 3975b54..53228b3 100644
 -
 -		if c.Bool("fleet-desktop") {
 -			targets = append(targets, constant.DesktopTUFTargetName)
-+		targets := []string{constant.OrbitTUFTargetName}
-+		if !externalComponentsComplete {
-+			targets = append(targets, constant.OsqueryTUFTargetName)
-+			if c.Bool("fleet-desktop") {
-+				targets = append(targets, constant.DesktopTUFTargetName)
-+			}
- 		}
- 		if c.Bool("dev-mode") {
- 			targets = targets[1:] // exclude orbit itself on dev-mode.
-@@ -702,18 +749,27 @@ func orbitAction(c *cli.Context) error {
+-		}
+-		if c.Bool("dev-mode") {
+-			targets = targets[1:] // exclude orbit itself on dev-mode.
+-		}
++		targets, allowEmptyTargets := updateRunnerTargets(
++			externalComponentsComplete,
++			c.Bool("fleet-desktop"),
++			c.Bool("dev-mode"),
++		)
+ 		updateRunner, err = update.NewRunner(updater, update.RunnerOptions{
+ 			CheckInterval:              c.Duration("update-interval"),
+ 			Targets:                    targets,
++			AllowEmptyTargets:          allowEmptyTargets,
+ 			SignaturesExpiredAtStartup: signaturesExpiredAtStartup,
+ 		})
+ 		if err != nil {
  			return err
  		}
  
@@ -132,7 +152,7 @@ index 3975b54..53228b3 100644
  		}
  
  		// Perform early check for updates before starting any sub-system.
-@@ -730,30 +786,38 @@ func orbitAction(c *cli.Context) error {
+@@ -730,30 +796,38 @@ func orbitAction(c *cli.Context) error {
  
  		addSubsystem(&g, "update runner", updateRunner)
  
@@ -193,7 +213,7 @@ index 3975b54..53228b3 100644
  		}
  	} else {
  		log.Info().Msg("running with auto updates disabled")
-@@ -908,7 +972,10 @@ func orbitAction(c *cli.Context) error {
+@@ -908,7 +982,10 @@ func orbitAction(c *cli.Context) error {
  		optionsAfterFlagfile []osquery.Option
  	)
  	options = append(options, osquery.WithDataPath(c.String("root-dir"), ""))
@@ -205,7 +225,7 @@ index 3975b54..53228b3 100644
  	optionsAfterFlagfile = append(optionsAfterFlagfile, osquery.WithFlags(
  		[]string{"--database_path", osqueryDB},
  	))
-@@ -1195,7 +1262,7 @@ func orbitAction(c *cli.Context) error {
+@@ -1195,7 +1272,7 @@ func orbitAction(c *cli.Context) error {
  	// Set the function that will be called to open the SSO window if an enroll
  	// request returns an "end user authentication required" error.
  	orbitClient.SetOpenSSOWindowFunc(func() error {
@@ -214,7 +234,7 @@ index 3975b54..53228b3 100644
  		if err != nil {
  			return fmt.Errorf("opening browser: %w", err)
  		}
-@@ -1619,7 +1686,7 @@ func orbitAction(c *cli.Context) error {
+@@ -1619,7 +1696,7 @@ func orbitAction(c *cli.Context) error {
  		}
  		// My Device page
  		browserURL := deviceClient.BrowserDeviceURL(token)
@@ -223,7 +243,7 @@ index 3975b54..53228b3 100644
  	}
  
  	if runSetupExperience {
-@@ -2580,7 +2647,7 @@ func executeFleetDesktopWithPermanentError(desktopPath string, errorMessage stri
+@@ -2580,7 +2657,7 @@ func executeFleetDesktopWithPermanentError(desktopPath string, errorMessage stri
  	return nil
  }
  
@@ -232,7 +252,7 @@ index 3975b54..53228b3 100644
  	switch runtime.GOOS {
  	case "linux":
  		loggedInUser, err := user.UserLoggedInViaGui()
-@@ -2592,11 +2659,10 @@ func openBrowserWindow(browserURL string) error {
+@@ -2592,11 +2669,10 @@ func openBrowserWindow(browserURL string) error {
  			return errors.New("no user logged in")
  		}
  
@@ -249,10 +269,18 @@ index 3975b54..53228b3 100644
  		var opts []execuser.Option
  		opts = append(opts, execuser.WithUser(*loggedInUser))
 diff --git a/orbit/cmd/orbit/orbit_test.go b/orbit/cmd/orbit/orbit_test.go
-index efbc6fe..6200246 100644
+index efbc6fe..148d140 100644
 --- a/orbit/cmd/orbit/orbit_test.go
 +++ b/orbit/cmd/orbit/orbit_test.go
-@@ -389,3 +389,67 @@ func TestProcessLog(t *testing.T) {
+@@ -6,6 +6,7 @@ import (
+ 	"path/filepath"
+ 	"testing"
+ 
++	"github.com/fleetdm/fleet/v4/orbit/pkg/constant"
+ 	"github.com/fleetdm/fleet/v4/server/fleet"
+ 	"github.com/stretchr/testify/assert"
+ 	"github.com/stretchr/testify/require"
+@@ -389,3 +390,121 @@ func TestProcessLog(t *testing.T) {
  	msg = <-runner.errorNotifyCh
  	assert.Equal(t, string(logErrorMissingExecMsg), msg)
  }
@@ -320,3 +348,101 @@ index efbc6fe..6200246 100644
 +	require.Equal(t, "/usr/bin/firefox", linuxBrowserPath("", pathExists))
 +	require.Equal(t, "/usr/bin/xdg-open", linuxBrowserPath("", func(string) bool { return false }))
 +}
++
++func TestUpdateRunnerTargets(t *testing.T) {
++	tests := []struct {
++		name                       string
++		externalComponentsComplete bool
++		desktopEnabled             bool
++		devMode                    bool
++		want                       []string
++		allowEmpty                 bool
++	}{
++		{
++			name: "managed components",
++			want: []string{constant.OrbitTUFTargetName, constant.OsqueryTUFTargetName},
++		},
++		{
++			name:           "managed desktop",
++			desktopEnabled: true,
++			want: []string{
++				constant.OrbitTUFTargetName,
++				constant.OsqueryTUFTargetName,
++				constant.DesktopTUFTargetName,
++			},
++		},
++		{
++			name:    "managed dev mode",
++			devMode: true,
++			want:    []string{constant.OsqueryTUFTargetName},
++		},
++		{
++			name:                       "external components",
++			externalComponentsComplete: true,
++			want:                       []string{constant.OrbitTUFTargetName},
++		},
++		{
++			name:                       "external components in dev mode",
++			externalComponentsComplete: true,
++			devMode:                    true,
++			want:                       []string{},
++			allowEmpty:                 true,
++		},
++	}
++
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			targets, allowEmpty := updateRunnerTargets(
++				tt.externalComponentsComplete,
++				tt.desktopEnabled,
++				tt.devMode,
++			)
++			require.Equal(t, tt.want, targets)
++			require.Equal(t, tt.allowEmpty, allowEmpty)
++		})
++	}
++}
+diff --git a/orbit/pkg/update/runner.go b/orbit/pkg/update/runner.go
+index 89f5267..b4deb72 100644
+--- a/orbit/pkg/update/runner.go
++++ b/orbit/pkg/update/runner.go
+@@ -29,6 +29,9 @@ type RunnerOptions struct {
+ 	CheckInterval time.Duration
+ 	// Targets is the names of the artifacts to watch for updates.
+ 	Targets []string
++	// AllowEmptyTargets permits a runner with no initial targets. This is used
++	// when extensions can add targets dynamically after enrollment.
++	AllowEmptyTargets bool
+ 	// SignaturesExpiredAtStartup should be set to true when any of the
+ 	// "root", "targets", and "snapshot" roles has an expired signature.
+ 	// When that's the case, the go-tuf library won't allow loading the targets
+@@ -102,7 +105,7 @@ func NewRunner(updater *Updater, opt RunnerOptions) (*Runner, error) {
+ 	if opt.CheckInterval <= 0 {
+ 		return nil, errors.New("runner must be configured with interval greater than 0")
+ 	}
+-	if len(opt.Targets) == 0 {
++	if len(opt.Targets) == 0 && !opt.AllowEmptyTargets {
+ 		return nil, errors.New("runner must have nonempty subscriptions")
+ 	}
+ 
+diff --git a/orbit/pkg/update/runner_test.go b/orbit/pkg/update/runner_test.go
+index 209a904..dd99479 100644
+--- a/orbit/pkg/update/runner_test.go
++++ b/orbit/pkg/update/runner_test.go
+@@ -66,6 +66,16 @@ func TestNewRunner(t *testing.T) {
+ 	require.False(t, didUpdate)
+ }
+ 
++func TestNewRunnerAllowsEmptyTargets(t *testing.T) {
++	runner, err := NewRunner(&Updater{}, RunnerOptions{
++		CheckInterval:              time.Second,
++		AllowEmptyTargets:          true,
++		SignaturesExpiredAtStartup: true,
++	})
++	require.NoError(t, err)
++	require.Empty(t, runner.opt.Targets)
++}
++
+ func TestRandomizeDuration(t *testing.T) {
+ 	rand, err := randomizeDuration(10 * time.Minute)
+ 	require.NoError(t, err)
